@@ -1,11 +1,11 @@
 fastapi
 uvicorn
 openai
-python-dotenv
-langchain==0.1.13
-faiss-cpu==1.8.0
 beautifulsoup4
 requests
 transformers==4.41.0
 sentence-transformers==2.6.1
-torch==2.2.2+cpu -f https://download.pytorch.org/whl/torch_stable.html
+torch==2.2.2+cpu
+torchaudio==2.2.2+cpu
+-f https://download.pytorch.org/whl/torch_stable.html
+python-dotenv
