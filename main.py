@@ -7,30 +7,34 @@ from openai import OpenAI
 import os
 from dotenv import load_dotenv
 
-# ✅ Load environment variables
+# ✅ Load environment variables (.env di local, Variables di Railway)
 load_dotenv()
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+if not OPENAI_API_KEY:
+    raise RuntimeError("❌ OPENAI_API_KEY tidak ditemukan. Set di Railway Variables.")
 
 # ✅ Inisialisasi FastAPI App
 app = FastAPI()
 
-# ✅ CORS Middleware – izinkan akses frontend lokal/frontend live
+# ✅ CORS Middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # ⚠️ Production: ubah ke ["https://planville.de"]
+    allow_origins=["*"],  # ⚠️ Production: ganti ke ["https://planville.de"]
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # ✅ Inisialisasi OpenAI Client
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+client = OpenAI(api_key=OPENAI_API_KEY)
 
-# ✅ Struktur Permintaan dari Frontend
+# ✅ Struktur permintaan dari frontend
 class ChatRequest(BaseModel):
     message: str
-    lang: str = "de"  # default bahasa Jerman
+    lang: str = "de"
 
-# ✅ Keyword-based intent detection (untuk keamanan jawaban)
+# ✅ Keyword-based intent detection
 VALID_KEYWORDS = [
     "photovoltaik", "photovoltaics", "dach", "roof",
     "wärmepumpe", "heat pump", "klimaanlage", "air conditioner",
@@ -39,7 +43,6 @@ VALID_KEYWORDS = [
 ]
 
 def is_valid_intent(message: str) -> bool:
-    """Periksa apakah input user mengandung keyword valid"""
     msg = message.lower()
     return any(keyword in msg for keyword in VALID_KEYWORDS)
 
@@ -48,7 +51,6 @@ def is_valid_intent(message: str) -> bool:
 async def chat(request: ChatRequest):
     print(f"[📨 Request] Language: {request.lang} | Message: {request.message}")
 
-    # 🔒 Filter input: hanya pertanyaan yang sesuai keyword
     if not is_valid_intent(request.message):
         fallback_msg = {
             "de": "Ich kann nur Fragen zu Planville Dienstleistungen beantworten. "
@@ -59,18 +61,16 @@ async def chat(request: ChatRequest):
         return {"reply": fallback_msg.get(request.lang, fallback_msg["de"])}
 
     try:
-        # 🧠 Ambil konteks dari RAG index
+        # 🧠 Ambil konteks dari RAG
         context_docs = query_index(request.message)
 
-        # 🔄 Jika tidak ada hasil RAG, fallback ke hasil scraping
+        # 🔄 Fallback ke scraping
         if not context_docs:
             print("[⚠️] RAG kosong → menggunakan fallback scraper.")
             context_docs = get_scraped_context(request.message)
 
-        # 🔗 Gabungkan semua dokumen hasil jadi konteks
         context_text = "\n".join(context_docs)
 
-        # 📝 Bangun prompt untuk GPT
         prompt = f"""
 Du bist ein professioneller Kundenservice-Assistent von Planville GmbH.
 Antworte bitte höflich, direkt und hilfreich basierend auf dem folgenden Kontext.
@@ -82,37 +82,31 @@ Antworte bitte höflich, direkt und hilfreich basierend auf dem folgenden Kontex
 {context_text}
 """
 
-        # 🤖 Kirim ke OpenAI
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.4
         )
 
-        # ✅ Ambil jawaban
         reply_text = response.choices[0].message.content.strip()
 
-        # 🔁 Jika kosong, fallback ke jawaban statis
         if not reply_text:
-            fallback = (
+            return {"reply": (
                 "Entschuldigung, ich habe leider keine passende Information zu Ihrer Anfrage.\n\n"
                 "📞 Kontaktieren Sie unser Team direkt:\n"
                 "👉 https://planville.de/kontakt"
-            )
-            return {"reply": fallback}
+            )}
 
         return {"reply": reply_text}
 
     except Exception as e:
         print(f"[❌ GPT ERROR]: {e}")
-        return {
-            "reply": (
-                "Es ist ein Fehler aufgetreten. Bitte versuchen Sie es später erneut "
-                "oder kontaktieren Sie uns direkt.\n\n➡️ https://planville.de/kontakt"
-            )
-        }
+        return {"reply": (
+            "Es ist ein Fehler aufgetreten. Bitte versuchen Sie es später erneut "
+            "oder kontaktieren Sie uns direkt.\n\n➡️ https://planville.de/kontakt"
+        )}
 
-# ✅ Optional: Endpoint healthcheck
+# ✅ Healthcheck
 @app.get("/healthz")
 def health_check():
     return {"status": "ok"}
